@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>B2 Mastery App</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        :root { 
+            --color-a: #1b5e20; --color-b: #4caf50; --color-c: #fbc02d; 
+            --color-d: #f57c00; --color-f: #b71c1c; --dark: #1e272e; --accent: #3498db;
+        }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f1f2f6; margin: 0; padding: 15px; }
+        
+        .container { max-width: 1200px; margin: auto; display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 20px; }
+        
+        header { grid-column: 1 / -1; background: var(--dark); color: white; padding: 25px; border-radius: 20px; text-align: center; margin-bottom: 10px; }
+        
+        /* Progress Bar */
+        .progress-bg { background: #444; height: 30px; border-radius: 15px; overflow: hidden; position: relative; margin-top: 15px; }
+        .progress-fill { background: linear-gradient(90deg, #3498db, #2ecc71); height: 100%; width: 0%; transition: 1s ease-in-out; }
+        .progress-text { position: absolute; width: 100%; text-align: center; top: 0; font-weight: bold; line-height: 30px; color: white; font-size: 0.9em; }
+
+        .card { background: white; padding: 20px; border-radius: 20px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); }
+        h2 { border-bottom: 2px solid #f1f2f6; padding-bottom: 10px; color: var(--dark); font-size: 1.3em; margin-top: 0; }
+
+        /* Form prvky pre iPhone */
+        input, select { width: 100%; padding: 12px; margin: 8px 0; border: 1px solid #ddd; border-radius: 10px; font-size: 16px; box-sizing: border-box; -webkit-appearance: none; }
+        button { width: 100%; background: var(--accent); color: white; border: none; padding: 15px; border-radius: 12px; cursor: pointer; font-weight: bold; font-size: 16px; margin-top: 10px; }
+        button:active { transform: scale(0.98); opacity: 0.9; }
+
+        /* Položky zoznamu */
+        .item { background: #f8f9fa; padding: 15px; border-radius: 12px; margin-bottom: 10px; position: relative; display: flex; justify-content: space-between; align-items: center; border-left: 6px solid #ccc; }
+        .delete-btn { color: #e74c3c; font-size: 1.2em; cursor: pointer; padding: 5px 10px; }
+        
+        .plan-item { border-left-color: #f1c40f; background: #fffdf5; }
+        .grade-badge { padding: 4px 10px; border-radius: 8px; color: white; font-weight: bold; min-width: 25px; text-align: center; }
+        
+        .vocab-list { max-height: 300px; overflow-y: auto; }
+        .vocab-row { display: flex; justify-content: space-between; align-items: center; padding: 10px; border-bottom: 1px solid #eee; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <header>
+        <h1 style="margin:0; font-size: 1.5em;">🇪🇸 Mi Camino al B2</h1>
+        <div class="progress-bg">
+            <div id="b2Fill" class="progress-fill"></div>
+            <div id="b2Text" class="progress-text">0 / 200h</div>
+        </div>
+    </header>
+
+    <div class="card">
+        <h2>📅 Planificación</h2>
+        <input type="date" id="planDate">
+        <input type="text" id="planTask" placeholder="Čo máš v pláne?">
+        <button onclick="addPlan()" style="background: #f1c40f; color: #000;">Naplánovať</button>
+        <div id="planList" style="margin-top: 20px;"></div>
+    </div>
+
+    <div class="card">
+        <h2>✍️ Registro</h2>
+        <input type="text" id="lecName" placeholder="Téma lekcie">
+        <div style="display: flex; gap: 10px;">
+            <input type="date" id="lecDate">
+            <input type="number" id="lecHours" placeholder="Hod" step="0.1">
+        </div>
+        <input type="number" id="lecPerc" placeholder="Úspešnosť %">
+        <button onclick="addLesson()">Uložiť výsledok</button>
+        <div id="lessonLog" style="margin-top: 20px;"></div>
+    </div>
+
+    <div class="card">
+        <h2>📊 Progreso</h2>
+        <canvas id="gradeChart" style="max-height: 180px; margin-bottom: 20px;"></canvas>
+        
+        <h2>📖 Glosario</h2>
+        <input type="text" id="wordEs" placeholder="Español">
+        <input type="text" id="wordSk" placeholder="Slovenčina">
+        <button onclick="addWord()" style="background: var(--dark);">Pridať</button>
+        <div class="vocab-list" id="vocabList"></div>
+    </div>
+</div>
+
+<script>
+    let myChart = null;
+    const GOAL = 200;
+
+    const load = (k) => JSON.parse(localStorage.getItem(k)) || [];
+    const save = (k, d) => localStorage.setItem(k, JSON.stringify(d));
+
+    function getGrade(p) {
+        if (p >= 90) return { l: 'A', c: '#1b5e20' };
+        if (p >= 80) return { l: 'B', c: '#4caf50' };
+        if (p >= 70) return { l: 'C', c: '#fbc02d' };
+        if (p >= 60) return { l: 'D', c: '#f57c00' };
+        return { l: 'F', c: '#b71c1c' };
+    }
+
+    // --- PLÁNOVAČ MAZANIE ---
+    function renderPlans() {
+        const plans = load('p').sort((a,b) => new Date(a.date) - new Date(b.date));
+        const cont = document.getElementById('planList');
+        cont.innerHTML = '';
+        plans.forEach((p, i) => {
+            cont.innerHTML += `
+                <div class="item plan-item">
+                    <div><small>${p.date}</small><br><strong>${p.task}</strong></div>
+                    <div class="delete-btn" onclick="remove('p', ${i}, renderPlans)">🗑️</div>
+                </div>`;
+        });
+    }
+
+    function addPlan() {
+        const d = document.getElementById('planDate').value;
+        const t = document.getElementById('planTask').value;
+        if(d && t) {
+            const data = load('p');
+            data.push({date: d, task: t});
+            save('p', data);
+            renderPlans();
+            document.getElementById('planTask').value = '';
+        }
+    }
+
+    // --- LEKCIE MAZANIE ---
+    function renderLessons() {
+        const lessons = load('l');
+        const cont = document.getElementById('lessonLog');
+        let hTotal = 0;
+        const counts = {A:0, B:0, C:0, D:0, F:0};
+        
+        cont.innerHTML = '';
+        lessons.slice().reverse().forEach((ls, i) => {
+            const g = getGrade(ls.perc);
+            hTotal += parseFloat(ls.hours);
+            counts[g.l]++;
+            cont.innerHTML += `
+                <div class="item" style="border-left-color: ${g.c}">
+                    <div><small>${ls.date} | ${ls.hours}h</small><br><strong>${ls.name}</strong></div>
+                    <div style="display:flex; align-items:center;">
+                        <span class="grade-badge" style="background:${g.c}">${g.l}</span>
+                        <div class="delete-btn" onclick="remove('l', ${lessons.length-1-i}, renderLessons)">🗑️</div>
+                    </div>
+                </div>`;
+        });
+
+        const prg = Math.min((hTotal/GOAL)*100, 100);
+        document.getElementById('b2Fill').style.width = prg + '%';
+        document.getElementById('b2Text').innerText = `${hTotal.toFixed(1)} / ${GOAL}h (${prg.toFixed(1)}%)`;
+
+        const ctx = document.getElementById('gradeChart').getContext('2d');
+        if(myChart) myChart.destroy();
+        myChart = new Chart(ctx, {
+            type: 'doughnut',
+            data: {
+                labels: ['A','B','C','D','F'],
+                datasets: [{ data: Object.values(counts), backgroundColor: ['#1b5e20','#4caf50','#fbc02d','#f57c00','#b71c1c'] }]
+            },
+            options: { plugins: { legend: { position: 'bottom', labels: { boxWidth: 12 } } } }
+        });
+    }
+
+    function addLesson() {
+        const n = document.getElementById('lecName').value;
+        const d = document.getElementById('lecDate').value;
+        const h = document.getElementById('lecHours').value;
+        const p = document.getElementById('lecPerc').value;
+        if(n && d && h && p) {
+            const data = load('l');
+            data.push({name:n, date:d, hours:h, perc:p});
+            save('l', data);
+            renderLessons();
+            ['lecName','lecHours','lecPerc'].forEach(id => document.getElementById(id).value = '');
+        }
+    }
+
+    // --- SLOVNÍK MAZANIE ---
+    function renderVocab() {
+        const words = load('v');
+        const cont = document.getElementById('vocabList');
+        cont.innerHTML = '';
+        words.slice().reverse().forEach((w, i) => {
+            cont.innerHTML += `
+                <div class="vocab-row">
+                    <span><strong>${w.es}</strong>: ${w.sk}</span>
+                    <div class="delete-btn" style="font-size:0.9em" onclick="remove('v', ${words.length-1-i}, renderVocab)">✕</div>
+                </div>`;
+        });
+    }
+
+    function addWord() {
+        const es = document.getElementById('wordEs').value;
+        const sk = document.getElementById('wordSk').value;
+        if(es && sk) {
+            const data = load('v');
+            data.push({es, sk});
+            save('v', data);
+            renderVocab();
+            document.getElementById('wordEs').value = '';
+            document.getElementById('wordSk').value = '';
+        }
+    }
+
+    function remove(key, index, cb) {
+        if(confirm('Naozaj vymazať?')) {
+            const d = load(key);
+            d.splice(index, 1);
+            save(key, d);
+            cb();
+        }
+    }
+
+    // START
+    renderPlans();
+    renderLessons();
+    renderVocab();
+</script>
+
+</body>
+</html>
